@@ -22,9 +22,31 @@ require 'fileutils'
 
 load 'lib/csv_helper.rb'
 
-@date_threshold = Date.parse("2016-09-01")
+@date_threshold = Date.parse("2020-09-01")
+
+def fetch(uri_str, limit = 10)
+    raise ArgumentError, 'too many HTTP redirects' if limit == 0
+
+    response = Net::HTTP.get_response(URI(uri_str))
+
+    case response
+         when Net::HTTPSuccess then
+           response
+         when Net::HTTPRedirection then
+           location = response['location']
+           warn "redirected to #{location}"
+           fetch(location, limit - 1)
+         else
+           response.value
+         end
+    end
 
 def download_job(job, name, wait_in_s = 1)
+  #puts 'Job'
+  #puts job
+  #puts 'Name'
+  #puts name
+  #STDOUT.flush
   if (wait_in_s > 64)
     STDERR.puts "Error: Giveup: We can't wait forever for #{job}"
     return 0
@@ -34,14 +56,22 @@ def download_job(job, name, wait_in_s = 1)
 
   begin
     begin
-      log_url = "http://s3.amazonaws.com/archive.travis-ci.org/jobs/#{job}/log.txt"
+      #log_url = "http://s3.amazonaws.com/archive.travis-ci.org/jobs/#{job}/log.txt"
+      log_url = "http://api.travis-ci.org/jobs/#{job}/log.txt"
       STDERR.puts "Attempt 1 #{log_url}"
-      log = Net::HTTP.get_response(URI.parse(log_url)).body
+      #log = Net::HTTP.get_response(URI.parse(log_url)).body
+      log = fetch(log_url).body
+      #puts 'Log file'
+      #puts log
     rescue
       # Workaround if log.body results in error.
-      log_url = "http://s3.amazonaws.com/archive.travis-ci.org/jobs/#{job}/log.txt"
+      log_url = "http://api.travis-ci.org/jobs/#{job}/log.txt"
+      #log_url = "http://s3.amazonaws.com/archive.travis-ci.org/jobs/#{job}/log.txt"
       STDERR.puts "Attempt 2 #{log_url}"
-      log = Net::HTTP.get_response(URI.parse(log_url)).body
+      #log = Net::HTTP.get_response(URI.parse(log_url)).body
+      log = fetch(log_url).body
+      #puts 'Log file'
+      #puts log
     end
 
     File.open(name, 'w') { |f| f.puts log }
@@ -159,7 +189,7 @@ def get_travis(repo, build_logs = true, wait_in_s = 1)
     sleep wait_in_s
   end
 
-  @parent_dir = File.join('build_logs/', repo.gsub(/\//, '@'))
+  @parent_dir = File.join('build_logs_api2/', repo.gsub(/\//, '@'))
   @error_file = File.join(@parent_dir, 'errors')
   @build_logs = build_logs
   FileUtils::mkdir_p(@parent_dir)
@@ -180,6 +210,8 @@ def get_travis(repo, build_logs = true, wait_in_s = 1)
     end
 
     repo_id = JSON.parse(open("https://api.travis-ci.org/repos/#{repo}").read)['id']
+    #puts 'Repo id'
+    #puts repo_id
 
     (0..highest_build).select { |x| x % 25 == 0 }.reverse_each do |last_build|
       all_builds << paginate_build(last_build, repo_id)
